@@ -48,15 +48,20 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 
-.rds
+*.rds
 
-.shp
-.dbf
-.sbn
-.sbx
-.xml
-.txt
-.htm
+*.shp
+*.dbf
+*.sbn
+*.sbx
+*.xml
+*.txt
+*.htm
+*.shx
+*.prj
+*.cpg
+*.db
+*.docx
 
 # Ignore all subdirectories
 */*

@@ -1,0 +1,233 @@
+---
+title: Use tabs to organize content
+output: html_document
+---
+
+You can turn parallel sections to tabs in `html_document` output.
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(kableExtra)
+df_sp_hetero <- readRDS("model_outputs/df_sp_hetero.rds")
+tables <- split( df_sp_hetero , f = df_sp_hetero$model )
+```
+
+
+## Results {.tabset}
+
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```
+### Plots
+
+We show a scatter plot in this section.
+
+```{r echo=FALSE}
+kbl(tables[[1]]) %>%
+  kable_minimal()
+```

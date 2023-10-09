@@ -1,0 +1,933 @@
+---
+title: "Miscellaneous tables and graphs for paper"
+author: "Christian Stetter"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Load packages
+```{r}
+library(tidyverse)
+library(kableExtra) # Construct latex tables
+library(gmnl) #Access info of estimated models
+library(patchwork)  # Combine plots
+library(cowplot) #Annotate plots exp. ggdraw
+library(grafify) # Colorblind-friendly color palette
+library(support.BWS) # Counting scores
+library(sf)
+library(raster)
+library(terra)
+library(RColorBrewer)
+```
+ 
+# Load data
+```{r}
+model_data_count <- readRDS("model_outputs/model_data_count.rds")
+
+df_final <- readRDS("df_final.rds")
+df_model <- readRDS("df_model.rds")
+
+df_final <- left_join(df_model, df_final)
+
+df_final$CropFarm <- with(df_final, ifelse(business_type<3|business_type==7, 1,0))
+df_final$shareOrganic <- with(df_final, ifelse(management_type==2, 1,0))
+df_final$FullTime <- with(df_final, ifelse(main_part_time==1, 1,0))
+
+df_final$share_rented_land <- 1-df_final$own_area/df_final$size
+df_final$university_d <- with(df_final, ifelse(education>3, 1,0))
+```
+
+```{r}
+cc_adapt_names <-c("business_div"   ='Business diversification'  ,
+                   "catch_crops"    ='Cultivation of cover crops'   ,
+                   "con_tillage"    ='Conservation tillage'   ,
+                   "fertilizer"     ='Adjusted fertilizer management'    ,
+                   "irrigation"     ='Irrigation'    ,
+                   "manag_rhythm"   ='Adjusted crop management rhythm'  ,
+                   "mixed_crops"    ='Mixed cropping'   ,
+                   "plant_protect"  ='Adjusted plant protection management' ,
+                   "prec_farming"   ='Precision farming'  ,
+                   "rep(1, R)"      ='Insurance'     ,
+                   "res_crops"      ='Cultivation of resilient crops',
+                   "rotation"       ='Crop rotation diversification',
+                   "res_varieties"  ='Cultivation of resilient crop varieties')
+```
+
+# Data descriptives
+```{r}
+sdat <-df_final %>% 
+ dplyr::select(FullTime, size, share_rented_land, workforce, 
+        CropFarm, shareOrganic, age, university_d, temp, rain, sqi) %>% 
+  filter(size<10000)
+
+tab_descriptive <- 
+cbind(
+sdat %>%
+ summarise_all(mean, na.rm=T) %>% t,
+
+sdat %>%
+ summarise_all(median, na.rm=T) %>% t,
+
+sdat %>%
+ summarise_all(sd, na.rm=T) %>%t)
+
+tab_descriptive <- round(tab_descriptive, 2)
+tab_descriptive <- cbind(
+ tab_descriptive,
+ c("FullTime20"         = "0.45\\textsuperscript{c}",
+   "size20"             = "63.15\\textsuperscript{c}",
+   "share_rented_land20"= "0.6181\\textsuperscript{c}",
+   "workforce20"        = "3.57\\textsuperscript{c}",
+   "CropFarm20"         = "0.3337\\textsuperscript{c}",
+   "organic_dummy20"    = "0.0994\\textsuperscript{c}",
+   "age"                = "55--64\\textsuperscript{d}",
+   "university_d"       = "0.0925\\textsuperscript{d}",
+   "temp20"               = "12.84\\textsuperscript{e}",
+   "rain20"               = "554.5\\textsuperscript{e}", # with(filter(rain_poly, Index!=0), mean(Index))
+   "soil20"               = "6.74\\textsuperscript{f}"
+   )
+ )
+
+# c https://www.destatis.de/DE/Themen/Branchen-Unternehmen/Landwirtschaft-Forstwirtschaft-Fischerei/Landwirtschaftszaehlung2020/ergebnisse.html
+
+row.names(tab_descriptive) <-c("Full-time farming (1 if yes, 0 otherwise)",
+                               "Utilized agricultural area (ha)",
+                               "Share of rented land (\\%)",
+                               "Workforce (N)",
+                               "Specialist crop farm (1 if yes, 0 otherwise)\\textsuperscript{a}",
+                               "Organic farm (1 if yes, 0 otherwise)",
+                               "Farmer's age (years)",
+                               "Higher education (1 if yes, 0 otherwise)\\textsuperscript{b}",
+                               "Temperature (°C, Mar--Oct, 1991--2020)",
+                               "Precipitation (°C, Mar--Oct, 1991--2020)",
+                               "Soil quality index (0--10)"
+                               )
+
+tab <- kbl(tab_descriptive,
+           booktabs = T, 
+           format = "latex", 
+           label = "descriptive_statistics",
+           caption = "Sample description and comparison with the population mean.",
+           # digits = 2,
+           # linesep = "\\addlinespace",
+           escape = F, 
+           row.names = T,
+           col.names = c("Mean", "Median", "SD", "Population Mean" ),
+           align=rep('r', 4)) %>%
+  column_spec(1, width = "6.5cm") %>%
+  add_header_above(c(" ", "Sample" = 3, "Germany" = 1)) %>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  footnote(general_title = "", footnote_as_chunk = F,
+           general = "\\\\footnotesize{ e \\\\citet{DWD2023}, \\\\citet{Panagos2022}}",
+           escape = F, threeparttable = F) %>%
+  footnote(general_title = "", footnote_as_chunk = F,
+           general = "\\\\footnotesize{ to having a university degree. Sources: c \\\\citet{Destatis2021b}, d \\\\citet{Destatis2021a}}, ",
+           escape = F, threeparttable = F) %>%
+  footnote(general_title = "", footnote_as_chunk = T,escape = F,
+           threeparttable = F,
+           general = "\\\\footnotesize{Note: Number of observations = 198; a AWU denotes annual working units. b Higher education refers}")
+
+ save_kable(tab, "../tables/tab_descriptive.tex", keep_tex = T)
+```
+
+
+# Counting method result
+```{r}
+tab_count <-bws.count(model_data_count, cl=1)[[2]] %>% 
+  dplyr::select(1:4) %>%
+  rownames_to_column() %>% 
+  arrange(desc(stdBW)) %>% 
+  mutate(rank=rank(desc(stdBW)),
+         stdBW=round(stdBW,2),
+         rowname=plyr::revalue(factor(rowname), cc_adapt_names),
+         rowname=str_to_title(rowname))
+
+colnames(tab_count) <- 
+  c("Adaptation Strategy","B", "W", "B-W", "std.\nB-W", "Rank")
+
+
+tab <- kbl(tab_count,
+           booktabs = T, 
+           format = "latex", 
+           label = "count_tab",
+           caption = "Counting results summary.",
+           # linesep = "\\addlinespace",
+           escape = F, 
+           row.names = F) %>% 
+           # col.names = c("Adaptation measure", rep(c("SP (\\%)", "95\\% CI (\\%)", "Rank"),3)),
+           # align=c("l", rep('c', 9))) %>% 
+  kable_styling(font_size = 10) 
+  # column_spec(1, width = "2.5cm") %>% 
+  # add_header_above(c(" ", "Multinomial logit" = 3, "Mixed logit" = 3, 
+  #                    "Mixed logit incl. farm structure" = 3)) 
+
+save_kable(tab, "../tables/tab_count.tex", keep_tex = T)
+
+```
+
+
+#Load models 
+```{r}
+df_model <- readRDS("df_model.rds")
+
+res_bws_mnl <- readRDS("model_outputs/res_bws_mnl.rds")
+res_bws_mixl <- readRDS("model_outputs/res_bws_mxl.rds")
+res_bws_mixl_cor <- readRDS("model_outputs/res_bws_mxl_cor.rds")
+res_bws_mixl_bio_uncor <-readRDS("model_outputs/res_bws_mixl_bio_uncor.rds")
+res_bws_farm_structure <- readRDS("model_outputs/res_bws_farm_structure.rds")
+res_bws_behavior <- readRDS("model_outputs/res_bws_behavior.rds")
+res_bws_mixl_bio_cor <- readRDS("model_outputs/res_bws_mixl_bio_cor.rds")
+# res_bws_mixl_bio_cor_sqr <- readRDS("model_outputs/res_bws_mixl_bio_cor_sqr.rds")
+# res_bws_mixl_bio_cor_nfkw <- readRDS("model_outputs/res_bws_mixl_bio_cor_nfkw.rds")
+```
+
+# Correlation: bundles
+```{r dev='cairo_pdf'}
+library(corrplot)
+library(RColorBrewer)
+M <-exp(effect.gmnl(res_bws_mixl_bio_cor)$mean)
+M <- cbind(M, rep(exp(1), nrow(M))) %>% 
+  as.data.frame() %>% 
+  rename(
+    'Business diversification'                ="business_div"         ,
+    'Cultivation of cover crops'              =  "catch_crops"        ,
+    'Conservation tillage'                    =         "con_tillage",
+    'Adjusted fertilizer management'       =         "fertilizer" ,
+    'Irrigation'                              =         "irrigation" ,
+    'Adjusted crop management rhythm'         =         "manag_rhythm",
+    'Mixed cropping'                          =         "mixed_crops",
+    'Adjusted plant protection management'    =         "plant_protect",
+    'Precision farming'                       =         "prec_farming",
+    'Insurance'                               =         "V13"         ,
+    'Cultivation of resilient crops'          =         "res_crops"   ,
+    'Crop rotation diversification'           =         "rotation"    ,
+    'Cultivation of resilient crop varieties' =         "res_varieties"
+  )
+
+
+
+
+M_new<-t(apply(M,1, function(x) x/sum(x)))
+
+CM <- Hmisc::rcorr(M_new)[[1]]
+PM <- Hmisc::rcorr(M_new)[[3]]
+
+
+# Run in console
+file_path= "img/corrplot_sp.png"
+png(height=700, width=700, file=file_path, type = "cairo")
+
+corrplot(CM, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"), diag = F, p.mat = PM, 
+         addCoef.col = "black", tl.col = "black")
+
+dev.off()
+
+```
+
+# Regression output table
+```{r}
+library(broom)
+
+tidy.gmnl <- function(x, ...) {
+  cc <- data.frame(getSummary.gmnl(x)$coef) %>% 
+    rownames_to_column() %>% as_tibble()
+  return(cc)
+}
+
+res_bws_mnl_tidy <- tidy.gmnl(res_bws_mnl)
+
+res_bws_mixl_uncor_tidy <- tidy.gmnl(res_bws_mixl)
+
+res_bws_mixl_cor_tidy <- tidy.gmnl(res_bws_mixl_cor) |> 
+  filter(rowname %in% res_bws_mixl_uncor_tidy$rowname |
+         unlist(
+           lapply(strsplit(rowname, split = "[.]"), function(i) 
+           anyDuplicated(i)))!=0
+         ) |>
+  mutate(rowname=res_bws_mixl_uncor_tidy$rowname)
+
+res_bws_mixl_bio_uncor_tidy <- tidy.gmnl(res_bws_mixl_bio_uncor)
+
+res_bws_mixl_bio_cor_tidy <- tidy.gmnl(res_bws_mixl_bio_cor) |>
+  filter(rowname %in% res_bws_mixl_bio_uncor_tidy$rowname |
+         unlist(
+           lapply(strsplit(rowname, split = "[.]"), function(i) 
+           anyDuplicated(i)))!=0
+         ) |>
+  mutate(rowname=res_bws_mixl_bio_uncor_tidy$rowname)
+
+res_bws_farm_structure_tidy <- tidy.gmnl(res_bws_farm_structure)
+
+res_bws_behavior_tidy <- tidy.gmnl(res_bws_behavior)
+
+glance.gmnl <- function(x){
+  data.frame(as.list(getSummary.gmnl(x)$sumstat))  %>%
+    dplyr::select(logLik, AIC, N)
+}
+
+res_bws_mnl_glance <- glance.gmnl(res_bws_mnl)
+
+res_bws_farm_structure_glance <- glance.gmnl(res_bws_farm_structure)
+res_bws_behavior_glance <- glance.gmnl(res_bws_behavior)
+
+
+res_bws_mixl_cor_glance <- glance.gmnl(res_bws_mixl_cor)
+res_bws_mixl_uncor_glance <- glance.gmnl(res_bws_mixl)
+res_bws_mixl_bio_uncor_glance <- glance.gmnl(res_bws_mixl_bio_uncor)
+res_bws_mixl_bio_cor_glance <- glance.gmnl(res_bws_mixl_bio_cor)
+
+```
+
+```{r}
+library(texreg)
+
+extract_broom <- function(tidy, glance){
+texreg::createTexreg(coef.names = tidy$rowname,
+                     coef = tidy$est,
+                     se = tidy$se,
+                     pvalues = tidy$p,
+                     gof.names = colnames(glance),
+                     gof = unlist(glance),
+                     gof.decimal = c(rep(TRUE,3)))
+}
+
+
+# extract_broom(res_bws_farm_structure_tidy, res_bws_farm_structure_glance)@coef.names
+
+coef_names <- list(
+  "prec_farming"           =   "Precision farming",
+  "manag_rhythm"           =   "Adjusted crop management rhythm",
+  "plant_protect"          =   "Adjusted plant protection management",
+  "rotation"               =   "Crop rotation diversification",
+  "con_tillage"            =   "Conservation tillage",
+  "fertilizer"             =   "Adjusted fertilizer management",
+  "res_crops"              =   "Cultivation of resilient crops",
+  "res_varieties"          =   "Cultivation of resilient crop varieties",
+  "catch_crops"            =   "Cultivation of cover crops",
+  "mixed_crops"            =   "Mixed cropping",
+  "irrigation"             =   "Irrigation",
+  "business_div"           =   "Business diversification",
+  "prec_farming.loc_east"  =   "Precision farming : Location" ,
+  "prec_farming.organic"   =   "Precision farming : Production system" ,
+  "prec_farming.arable_d"  =   "Precision farming : Management focus" ,
+  "manag_rhythm.loc_east"  =   "Adjusted crop management rhythm : Location",
+  "manag_rhythm.organic"   =   "Adjusted crop management rhythm : Production system",
+  "manag_rhythm.arable_d"  =   "Adjusted crop management rhythm : Management focus",
+  "plant_protect.loc_east" =   "Adjusted plant protection management : Location",
+  "plant_protect.organic"  =   "Adjusted plant protection management : Production system",
+  "plant_protect.arable_d" =   "Adjusted plant protection management : Management focus",
+  "rotation.loc_east"      =   "Crop rotation diversification : Location",
+  "rotation.organic"       =   "Crop rotation diversification : Production system",
+  "rotation.arable_d"      =   "Crop rotation diversification : Management focus",
+  "con_tillage.loc_east"   =   "Conservation tillage : Location",
+  "con_tillage.organic"    =   "Conservation tillage : Production system",
+  "con_tillage.arable_d"   =   "Conservation tillage : Management focus",
+  "fertilizer.loc_east"    =   "Adjusted fertilizer management : Location",
+  "fertilizer.organic"     =   "Adjusted fertilizer management : Production system",
+  "fertilizer.arable_d"    =   "Adjusted fertilizer management : Management focus",
+  "res_crops.loc_east"     =   "Cultivation of resilient crops : Location",
+  "res_crops.organic"      =   "Cultivation of resilient crops : Production system",
+  "res_crops.arable_d"     =   "Cultivation of resilient crops : Management focus",
+  "res_varieties.loc_east" =   "Cultivation of resilient crop varieties : Location",
+  "res_varieties.organic"  =   "Cultivation of resilient crop varieties : Production system",
+  "res_varieties.arable_d" =   "Cultivation of resilient crop varieties : Management focus",
+  "catch_crops.loc_east"   =   "Cultivation of cover crops : Location",
+  "catch_crops.organic"    =   "Cultivation of cover crops : Production system",
+  "catch_crops.arable_d"   =   "Cultivation of cover crops : Management focus",
+  "mixed_crops.loc_east"   =   "Mixed cropping : Location",
+  "mixed_crops.organic"    =   "Mixed cropping : Production system",
+  "mixed_crops.arable_d"   =   "Mixed cropping : Management focus",
+  "irrigation.loc_east"    =   "Irrigation : Location",
+  "irrigation.organic"     =   "Irrigation : Production system",
+  "irrigation.arable_d"    =   "Irrigation : Management focus",
+  "business_div.loc_east"  =   "Business diversification : Location",
+  "business_div.organic"   =   "Business diversification : Production system",
+  "business_div.arable_d"  =   "Business diversification : Management focus",
+  "sd.prec_farming"        =   "SD Precision farming",
+  "sd.manag_rhythm"        =   "SD Adjusted crop management rhythm",
+  "sd.plant_protect"       =   "SD Adjusted plant protection management",
+  "sd.rotation"            =   "SD Crop rotation diversification",
+  "sd.con_tillage"         =   "SD Conservation tillage",
+  "sd.fertilizer"          =   "SD Adjusted fertilizer management",
+  "sd.res_crops"           =   "SD Cultivation of resilient crops",
+  "sd.res_varieties"       =   "SD Cultivation of resilient crop varieties",
+  "sd.catch_crops"         =   "SD Cultivation of cover crops",
+  "sd.mixed_crops"         =   "SD Mixed cropping",
+  "sd.irrigation"          =   "SD Irrigation",
+  "sd.business_div"        =   "SD Business diversification", 
+  
+  
+  "prec_farming.mtemp"  =   "Precision farming : Temperature" ,
+  "prec_farming.mrain"   =   "Precision farming : Precipitation" ,
+  "prec_farming.msqi"  =   "Precision farming : Soil quality" ,
+  "manag_rhythm.mtemp"  =   "Adjusted crop management rhythm : Temperature",
+  "manag_rhythm.mrain"   =   "Adjusted crop management rhythm : Precipitation",
+  "manag_rhythm.msqi"  =   "Adjusted crop management rhythm : Soil quality",
+  "plant_protect.mtemp" =   "Adjusted plant protection management : Temperature",
+  "plant_protect.mrain"  =   "Adjusted plant protection management : Precipitation",
+  "plant_protect.msqi" =   "Adjusted plant protection management : Soil quality",
+  "rotation.mtemp"      =   "Crop rotation diversification : Temperature",
+  "rotation.mrain"       =   "Crop rotation diversification : Precipitation",
+  "rotation.msqi"      =   "Crop rotation diversification : Soil quality",
+  "con_tillage.mtemp"   =   "Conservation tillage : Temperature",
+  "con_tillage.mrain"    =   "Conservation tillage : Precipitation",
+  "con_tillage.msqi"   =   "Conservation tillage : Soil quality",
+  "fertilizer.mtemp"    =   "Adjusted fertilizer management : Temperature",
+  "fertilizer.mrain"     =   "Adjusted fertilizer management : Precipitation",
+  "fertilizer.msqi"    =   "Adjusted fertilizer management : Soil quality",
+  "res_crops.mtemp"     =   "Cultivation of resilient crops : Temperature",
+  "res_crops.mrain"      =   "Cultivation of resilient crops : Precipitation",
+  "res_crops.msqi"     =   "Cultivation of resilient crops : Soil quality",
+  "res_varieties.mtemp" =   "Cultivation of resilient crop varieties : Temperature",
+  "res_varieties.mrain"  =   "Cultivation of resilient crop varieties : Precipitation",
+  "res_varieties.msqi" =   "Cultivation of resilient crop varieties : Soil quality",
+  "catch_crops.mtemp"   =   "Cultivation of cover crops : Temperature",
+  "catch_crops.mrain"    =   "Cultivation of cover crops : Precipitation",
+  "catch_crops.msqi"   =   "Cultivation of cover crops : Soil quality",
+  "mixed_crops.mtemp"   =   "Mixed cropping : Temperature",
+  "mixed_crops.mrain"    =   "Mixed cropping : Precipitation",
+  "mixed_crops.msqi"   =   "Mixed cropping : Soil quality",
+  "irrigation.mtemp"    =   "Irrigation : Temperature",
+  "irrigation.mrain"     =   "Irrigation : Precipitation",
+  "irrigation.msqi"    =   "Irrigation : Soil quality",
+  "business_div.mtemp"  =   "Business diversification : Temperature",
+  "business_div.mrain"   =   "Business diversification : Precipitation",
+  "business_div.msqi"  =   "Business diversification : Soil quality"
+    )
+```
+
+```{r}
+model_out <- texreg(
+  list(extract_broom(res_bws_mixl_uncor_tidy, res_bws_mixl_uncor_glance),   
+       extract_broom(res_bws_mixl_cor_tidy, res_bws_mixl_cor_glance),
+       extract_broom(res_bws_mixl_bio_uncor_tidy, res_bws_mixl_bio_uncor_glance),
+       extract_broom(res_bws_mixl_bio_cor_tidy, res_bws_mixl_bio_cor_glance)
+       # extract_broom(res_bws_behavior_tidy, res_bws_behavior_glance)
+  ),
+ custom.gof.rows = list("Correlated random coefficients"=rep(c("No", "Yes"),2),
+                        " " = rep(c(" "),4)),
+ custom.gof.names = c("Log likelihood", "Akaike Information Criterion", 
+                      "Number of observations"),
+ file = "../tables/reg_table.tex", 
+ single.row = T, 
+ fontsize = "scriptsize",
+ use.packages=FALSE, 
+ booktabs = T, 
+ # siunitx = T, 
+ center = T, 
+ no.margin = F,
+ custom.coef.map = coef_names,
+ # groups = list("\\textbf{Means}" = 1:12, 
+ #               "\\textbf{Farm structure adjustments}"= 13:48, 
+ #               "\\textbf{Standard deviations}" = 49:60), 
+ stars = c(0.001, 0.01, 0.05, 0.1),
+ symbol = "\\circ",
+ label = "tab:estimation_results",
+ # dcolumn = T,
+ # custom.model.names = c("1 MNL", "2 MIXL", "3 MIXL /w interactions"),
+ caption = "Estimation results summary.",
+ caption.above = TRUE
+ )
+```
+
+# Share of preference score average
+
+```{r}
+perc_bws_avg <- function(model){
+  Ncoef <- length(coef(model))
+  
+  ## Krinsky Robb
+  R <- 100000
+  a <- t(coef(model) + chol(vcov(model)) %*%
+           matrix(rnorm(R*Ncoef, mean = 0, sd = 1), nrow = Ncoef, ncol = R))
+  a <- as.data.frame(a)
+  
+  numerator <- cbind(exp(a[1:12]), rep(1, R))
+  denominator <- apply(numerator, 1, sum)
+  perc_imp<- (numerator/denominator)*100
+
+  return(perc_imp)                     
+}
+
+
+# dp_mnl <- data.frame(
+#   cbind(
+#     colMeans(perc_bws_avg(res_bws_mnl)),
+#     sapply(perc_bws_avg(res_bws_mnl), quantile, probs=0.025),
+#     sapply(perc_bws_avg(res_bws_mnl), quantile, probs=0.975),
+#     sapply(perc_bws_avg(res_bws_mnl), quantile, probs=0.05),
+#     sapply(perc_bws_avg(res_bws_mnl), quantile, probs=0.95))) %>% 
+#   rename(c("point"=1, "lb"=2, "ub"=3, "lb90"=4, "ub90"=5)) %>% 
+#   rownames_to_column("var_name") %>% 
+#   mutate(model=str_wrap("Multinomial logit", 15),
+#          rank=as.character(rank(-point))) %>% 
+#   arrange(desc(point))
+# 
+# dp_mixl <- data.frame(
+#   cbind(
+#     colMeans(perc_bws_avg(res_bws_mixl)),
+#     sapply(perc_bws_avg(res_bws_mixl), quantile, probs=0.025),
+#     sapply(perc_bws_avg(res_bws_mixl), quantile, probs=0.975),
+#     sapply(perc_bws_avg(res_bws_mixl), quantile, probs=0.05),
+#     sapply(perc_bws_avg(res_bws_mixl), quantile, probs=0.95))) %>% 
+#  rename(c("point"=1, "lb"=2, "ub"=3, "lb90"=4, "ub90"=5)) %>% 
+#   rownames_to_column("var_name") %>% 
+#   mutate(model=str_wrap("Mixed logit", 15),
+#          rank=as.character(rank(-point))) %>% 
+#   arrange(desc(point))
+
+dp_mixl_nat_cond <- data.frame(
+  cbind(
+    colMeans(perc_bws_avg(res_bws_mixl_bio_cor)),
+    sapply(perc_bws_avg(res_bws_mixl_bio_cor), quantile, probs=0.025),
+    sapply(perc_bws_avg(res_bws_mixl_bio_cor), quantile, probs=0.975),
+    sapply(perc_bws_avg(res_bws_mixl_bio_cor), quantile, probs=0.05),
+    sapply(perc_bws_avg(res_bws_mixl_bio_cor), quantile, probs=0.95))) %>% 
+  rename(c("point"=1, "lb"=2, "ub"=3, "lb90"=4, "ub90"=5)) %>% 
+  rownames_to_column("var_name")%>% 
+  mutate(model=str_wrap("Mixed logit incl. farm structure", 15),
+         rank=as.character(rank(-point))) %>% 
+  arrange(desc(point))
+```
+
+# Average table
+```{r}
+dp_tab <- dp_mixl_nat_cond %>% 
+  dplyr::select(-starts_with("model")) %>% 
+  mutate_if(is.numeric, sprintf, fmt = '%#.2f') %>% 
+  mutate(ci = paste0("[",  lb, ", ", ub, "]")) %>% 
+  mutate(var.name=recode(var_name, 
+                         "business_div"='Business diversification'  ,
+                         "catch_crops"='Cultivation of cover crops'   ,
+                         "con_tillage"='Conservation tillage'   ,
+                         "fertilizer"='Adjusted fertilization management'    ,
+                         "irrigation"='Irrigation'    ,
+                         "manag_rhythm"='Adjusted crop management rhythm'  ,
+                         "mixed_crops"='Mixed cropping'   ,
+                         "plant_protect"='Adjusted plant protection management' ,
+                         "prec_farming"='Precision farming'  ,
+                         "rep(1, R)"='Insurance'     ,
+                         "res_crops"='Cultivation of resilient crops',
+                         "rotation"='Crop rotation diversification',
+                         "res_varieties"='Cultivation of resilient crop varieties')) %>%
+  dplyr::select(var.name, point, ci, rank)
+
+tab <- kbl(dp_tab,
+           booktabs = T, 
+           format = "latex", 
+           label = "sp_avg",
+           caption = "Sample description and comparison with the population mean.",
+           # digits = 2,
+           # linesep = "\\addlinespace",
+           escape = F, 
+           row.names = F,
+           col.names = c("Adaptation measure", c("Share of preference (\\%)", "95\\% CI (\\%)", "Rank")),
+           align=c("l", rep('c', 3))) %>% 
+  kable_styling(font_size = 10) %>% 
+  column_spec(1, width = "6cm")
+
+ save_kable(tab, "../tables/tab_sp_avg.tex", keep_tex = T)
+```
+
+
+# Farm-level shares and rankings
+```{r}
+# Simplified function no CI
+calc_marg_effect_simple <- function(model=res_bws_mixl_bio_cor,
+                             temp=0,
+                             rain=0,
+                             soil=0){
+  
+  coef_main <- coef(model)[1:12]
+  coef_rain <- coef(model)[str_detect(names(coef(model)), "rain")]
+  coef_temp <- coef(model)[str_detect(names(coef(model)), "temp")]
+  # coef_soil <- coef(model)[str_detect(names(coef(model)), "nfkw")]
+  coef_soil <- coef(model)[str_detect(names(coef(model)), "sqi")]
+  # coef_soil <- coef(model)[str_detect(names(coef(model)), "sqr")]
+  
+  
+  numerator <- c(exp( coef_main + 
+                        coef_rain * rain + 
+                        coef_temp * temp + 
+                        coef_soil * soil),1)
+  denominator <- sum(numerator)
+  perc_imp<- (numerator/denominator)*100
+  
+  return(perc_imp)                     
+}
+
+
+
+
+df_rank <- t(sapply(1:nrow(df_model), function(i)
+  rank(-calc_marg_effect_simple(model = res_bws_mixl_bio_cor,
+                                rain = df_model$mrain[i],
+                                temp = df_model$mtemp[i],
+                                soil = df_model$msqi[i]
+  ))
+)) %>% 
+  as.data.frame() %>%
+  rename("Insurance"=13) %>%
+  pivot_longer(1:13)
+
+# SP plot
+df_sp <- cbind(
+  t(sapply(1:nrow(df_model), function(i)
+          calc_marg_effect_simple(model = res_bws_mixl_bio_cor,
+                            rain = df_model$mrain[i],
+                            temp = df_model$mtemp[i],
+                            soil = df_model$msqi[i]  
+                            ))
+),
+df_model$mrain,df_model$mtemp,df_model$msqi) %>% 
+  as.data.frame() %>% 
+  rename( "Insurance" = 13,
+          "rain"=14,
+          "temp"=15,
+          "soil_quality"=16) %>% 
+  pivot_longer(1:13) %>%
+  mutate(rank=df_rank$value) 
+
+
+order_measures_gg <- df_rank %>% 
+  group_by(name) %>% 
+  summarise(a = mean(value)) %>% 
+  arrange(desc(a))
+
+p1 <- ggplot(data = df_sp, aes(y = factor(name, levels=order_measures_gg$name))) + 
+  theme_bw(base_size = 18) +
+  scale_y_discrete( " ", labels = cc_adapt_names) 
+  
+
+library(patchwork)
+
+gg_sp_hetero <- p1 +
+  ggforce::geom_sina(aes(x = value),
+                     method = "counts", maxwidth = 0.7, alpha = 0.7, size=.2) +
+  coord_cartesian(xlim = c(-2, 50), ylim = c(0,14), expand = F) +
+  theme(axis.title.y=element_blank(),
+        plot.margin = margin(r = 5, l = 5, unit = 'mm'),
+    panel.grid.minor.x = element_line(size = 1)) +
+  scale_x_continuous(labels = scales::percent_format(scale = 1)) +
+  xlab("Preference shares")
+
+
+gg_ranking_hetero <- p1 +
+    ggforce::geom_sina(aes(x = rank), 
+                       method = "counts", maxwidth = 0.7, alpha = 0.7,size= .2) +
+    scale_x_reverse(breaks=seq(13, 1, -1)) +
+  theme(
+    axis.title.y=element_blank(),
+    plot.margin = margin(r = 5, l = 0, unit = 'mm'),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.minor.x = element_blank(), 
+  ) +
+  xlab("Preference ranking")
+
+
+
+ggsave(filename = paste0("img/gg_pref_farmlevel.png"), 
+       plot = gg_sp_hetero | gg_ranking_hetero, 
+       dpi=900,
+       width = 9.5, 
+       height = 4)
+
+```
+
+
+# Nat. cond. & preferences
+```{r}
+calc_marg_effect <- function(model=res_bws_mixl_bio_cor,
+                             temp=0,
+                             rain=0,
+                             soil=0){
+  Ncoef <- length(coef(model))
+  
+  ## Krinsky Robb
+  R <- 10000
+  a <- t(coef(model) + chol(vcov(model)) %*%
+           matrix(rnorm(R*Ncoef, mean = 0, sd = 1), nrow = Ncoef, ncol = R))
+  a <- as.data.frame(a)
+  
+  # numerator <- cbind(exp(a[1:12]), rep(1, R))
+  numerator <- cbind(exp(a[1:12] +
+                           dplyr::select(a, contains("mtemp")) * temp +
+                           dplyr::select(a, contains("mrain")) * rain +
+                           dplyr::select(a, contains("msqi")) * soil),
+                     rep(1, R))
+  denominator <- apply(numerator, 1, sum)
+  perc_imp<- (numerator/denominator)*100
+  
+  return(perc_imp)                     
+}
+
+
+theme_set(theme_bw(base_size=16))
+```
+
+
+```{r}
+source(file = "nat_cond_gradient.R")
+```
+
+
+```{r}
+ggRain <- process_df_sp(df = df_sp_rain, breaks = breaks_rain, xlabel = "Precipitation (100mm)")
+ggTemp <- process_df_sp(df = df_sp_temp, breaks = breaks_temp, xlabel = "Temperature (°C)")
+ggSoil <- process_df_sp(df = df_sp_soil, breaks = breaks_soil, xlabel = "Soil quality")
+
+
+ggsave(filename = paste0("img/gg_sp_nat_cond_grad.png"), 
+       plot = 
+         (ggRain+ plot_layout(tag_level = 'new')) /
+  (ggTemp + plot_layout(tag_level = 'new')) /
+  (ggSoil + plot_layout(tag_level = 'new')) +
+  plot_annotation(tag_levels = c('A', '1')) & 
+  theme(plot.tag = element_text(size = 32, face="bold")), 
+       dpi=600,
+       width = 24, 
+       height = 33)
+```
+
+
+
+
+
+
+# Nat cond. interaction plots
+```{r}
+set_breaks <- function(x=res_bws_mixl_bio_cor$mf$mtemp, n=20){
+seq(min(x),max(x), length.out = n)
+}
+
+breaks_temp <- set_breaks(res_bws_mixl_bio_cor$mf$mtemp)
+breaks_temp_orig <- breaks_temp + round(mean(df_model$temp), 1)
+
+breaks_rain <- set_breaks(res_bws_mixl_bio_cor$mf$mrain)
+breaks_rain_orig <- breaks_rain + round(mean(df_model$rain/100), 1)
+
+breaks_soil <- set_breaks(res_bws_mixl_bio_cor$mf$msqi)
+breaks_soil_orig <- breaks + round(mean(df_model$sqi), 1)
+
+
+#### Temperature soil ####
+a <- lapply(breaks_temp, function(j)
+  t(
+    sapply(
+      breaks_soil, function(i)
+        # rank(calc_marg_effect_simple(res_bws_mixl_bio_cor, soil=i, rain=j))
+        calc_marg_effect_simple(res_bws_mixl_bio_cor, soil=i, temp=j)
+    )
+  )
+)
+
+names(a) <- 1:length(breaks_temp)
+
+a <- lapply(a, function(df) {
+  as.data.frame(df) %>% 
+    mutate(xVar = 1:length(breaks_soil))
+})
+
+
+df_sp_temp_soil <- purrr::map_df(a, ~as.data.frame(.x), .id="yVar")
+df_sp_temp_soil[] <- lapply(df_sp_temp_soil, as.numeric)
+
+df_sp_temp_soil$model <- "Temperature (Y) : Soil quality (X)" #Strcutur Y axis * X axis
+
+#### Temperature rain ####
+a <- lapply(breaks_temp, function(j)
+  t(
+    sapply(
+      breaks_rain, function(i)
+        # rank(calc_marg_effect_simple(res_bws_mixl_bio_cor, soil=i, rain=j))
+        calc_marg_effect_simple(res_bws_mixl_bio_cor, rain=i, temp=j)
+    )
+  )
+)
+
+names(a) <- 1:length(breaks_temp)
+
+a <- lapply(a, function(df) {
+  as.data.frame(df) %>% 
+    mutate(xVar = 1:length(breaks_rain))
+})
+
+
+df_sp_temp_rain <- purrr::map_df(a, ~as.data.frame(.x), .id="yVar")
+df_sp_temp_rain[] <- lapply(df_sp_temp_rain, as.numeric)
+
+df_sp_temp_rain$model <- "Temperature (Y) : Rain (X)"
+
+#### Rain soil ####
+a <- lapply(breaks_rain, function(j)
+  t(
+    sapply(
+      breaks_soil, function(i)
+        # rank(calc_marg_effect_simple(res_bws_mixl_bio_cor, soil=i, rain=j))
+        calc_marg_effect_simple(res_bws_mixl_bio_cor, soil=i, rain=j)
+    )
+  )
+)
+
+names(a) <- 1:length(breaks_rain)
+
+a <- lapply(a, function(df) {
+  as.data.frame(df) %>% 
+    mutate(xVar = 1:length(breaks_soil))
+})
+
+
+df_sp_rain_soil <- purrr::map_df(a, ~as.data.frame(.x), .id="yVar")
+df_sp_rain_soil[] <- lapply(df_sp_rain_soil, as.numeric)
+
+df_sp_rain_soil$model <- "Rain (Y) : Soil quality (X)"
+```
+
+
+```{r}
+df_interact <- rbind(df_sp_temp_rain, df_sp_temp_soil, df_sp_rain_soil) %>%
+  pivot_longer(2:14, names_to = "adapt_measure") %>%
+  mutate(adapt_measure =
+           case_when(
+             adapt_measure == "V13"     ~ "Insurance",
+             adapt_measure == "prec_farming"  ~ "Precision farming",
+             adapt_measure == "manag_rhythm"  ~ "Adjustment of\nmanagement rhythm",
+             adapt_measure == "plant_protect" ~ "Adjusted plant\nprotection management",
+             adapt_measure == "rotation"      ~ "Adjustment of\ncrop rotation",
+             adapt_measure == "con_tillage"   ~ "Conservation tillage",
+             adapt_measure == "fertilizer"    ~ "Adjusted ferti-\nlization management",
+             adapt_measure == "res_crops"     ~ "Cultivation of\nresilient crops",
+             adapt_measure == "res_varieties" ~ "Cultivation of\nresilient crop varieties",
+             adapt_measure == "catch_crops"   ~ "Cultivation of cover crops",
+             adapt_measure == "mixed_crops"   ~ "Mixed cropping",
+             adapt_measure == "irrigation"    ~ "Irrigation",
+             adapt_measure == "business_div"  ~ "Business\ndiversification")) %>% 
+  mutate(adapt_measure=str_wrap(adapt_measure, 12))
+
+
+order_facets <- df_interact %>% 
+  group_by(adapt_measure) %>%
+  summarise(value=mean(value)) %>% 
+  arrange(desc(value))
+
+gg_interact <- df_interact %>% 
+    ggplot() +
+    geom_tile(aes(x=xVar, y=yVar, fill=value), col=NA) +
+    # geom_rug(data = df_model,
+    #          aes(x = scales::rescale(mrain,to = c(0,20)),
+    #              y = scales::rescale(msqi,to = c(0,20)))) +
+    facet_grid(factor(adapt_measure, levels = order_facets$adapt_measure) ~
+                   factor(model, levels = unique(df_interact$model)), 
+               scales = "free") +
+    theme_bw(base_size=16) +
+    scale_fill_viridis_b(direction = -1, n.breaks=25, "Preference share (%)" ) +
+    scale_y_continuous(breaks = c(3,17), labels = c("low", "high")) +
+    scale_x_continuous(breaks = c(3,17), labels = c("low", "high")) +
+    ylab("Y") +
+    xlab("X") +
+    theme(legend.key.height = unit(3, "cm"),
+          panel.grid = element_blank(),
+          panel.spacing=unit(.2, "lines")) +
+    coord_cartesian( ylim = c(1, 20), xlim = c(1, 20),
+                     expand = F)
+
+ggsave(filename = paste0("img/gg_sp_nat_cond_interact.png"), 
+       plot = gg_interact, 
+       dpi=600,
+       width = 13, 
+       height = 16)
+```
+
+
+# Descriptive statistics nat cond. maps
+```{r}
+temp_poly <- st_read(dsn="data/climate.gpkg", layer='gs_temperature') 
+
+rain_poly <- st_read(dsn="data/climate.gpkg", layer='gs_rain')
+
+soil_poly_de <- st_read(dsn="data/climate.gpkg", layer='soil_poly_de') %>% 
+  st_transform(crs(temp_poly))
+
+colnames(soil_poly_de)[1] <- colnames(temp_poly)[1] <- colnames(rain_poly)[1] <-
+  "Index"
+
+DEU <- sf::st_read("plz_spatial/DEU_adm0.shp") %>% 
+  st_transform(st_crs(soil_poly_de))
+```
+
+# Maps
+```{r}
+shape <- sf::st_read("plz_spatial/plz-gebiete.shp")
+
+
+
+shape5 <- shape %>% filter(shape$plz %in% df_final$location[which(nchar(df_final$location)==5)]) 
+
+shape4 <- shape[str_sub(shape$plz, 1, 4) %in% df_final$location[which(nchar(df_final$location)==4)],] %>% 
+  mutate(plz=shape$plz[str_sub(shape$plz, 1, 4) %in% df_final$location[which(nchar(df_final$location)==4)]] %>% str_sub(1,4))
+
+shape3 <- shape[str_sub(shape$plz, 1, 3) %in% df_final$location[which(nchar(df_final$location)==3)],] %>% 
+  mutate(plz=shape$plz[str_sub(shape$plz, 1, 3) %in% df_final$location[which(nchar(df_final$location)==3)]] %>% str_sub(1,3))
+
+shape2 <- shape[str_sub(shape$plz, 1, 2) %in% df_final$location[which(nchar(df_final$location)==2)],] %>% 
+  mutate(plz=shape$plz[str_sub(shape$plz, 1, 2) %in% df_final$location[which(nchar(df_final$location)==2)]] %>% str_sub(1,2))
+
+shape1 <- shape[str_sub(shape$plz, 1, 1) %in% df_final$location[which(nchar(df_final$location)==1)],] %>% 
+  mutate(plz=shape$plz[str_sub(shape$plz, 1, 1) %in% df_final$location[which(nchar(df_final$location)==1)]] %>% str_sub(1,1))
+
+
+sf_use_s2(FALSE)
+shape_list <- lapply(list(shape5,
+                          shape4,
+                          shape3,
+                          shape2,
+                          shape1), function(x)
+                            x %>% 
+                       dplyr::select(plz) %>% 
+                       group_by(plz) %>%
+                       summarise(geometry = sf::st_union(geometry)) %>%
+                       st_centroid() %>% 
+                       ungroup()
+)
+
+
+shape_final <- do.call(rbind, shape_list) %>% rename(location=plz)
+
+df_foo <- left_join(df_final, shape_final, by = "location")
+
+
+library(RColorBrewer)
+f <- function(pal) brewer.pal(brewer.pal.info[pal, "maxcolors"], pal)
+cols <- f("Set1")
+
+## build a temporary folder on disk
+temp <- tempfile()
+download.url <- "https://userpage.fu-berlin.de/soga/300/30100_data_sets/spatial/"
+zipfile <- "germany_districts.zip"
+## download the file
+download.file(paste0(download.url,zipfile),temp, mode="wb")
+## unzip the file(s)
+unzip(temp)
+## close file connection
+unlink(temp)
+## read the data
+shapeDE <- st_read("./germany_districts.shp") %>% 
+   st_transform(st_crs(shape_final))
+
+ggFarmDist <- ggplot() + 
+  geom_sf(data = DEU, color = gray(.5), alpha=0.2) +
+  geom_sf(data = st_jitter(df_foo$geometry, factor = .01) , color="black",   size=1.3)+
+  scale_color_manual(values=cols[1:6]) +
+  theme_void() +
+  ggtitle("Geographic distribution of the sample farms", subtitle = "N=624")
+
+
+ggsave(filename = paste0("img/farm_distr_map.png"), 
+       plot=ggFarmDist,
+       dpi=900,
+       width = 5, 
+       height = 9)
+```
+
