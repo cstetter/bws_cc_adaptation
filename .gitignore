@@ -47,3 +47,16 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+.rds
+
+.shp
+.dbf
+.sbn
+.sbx
+.xml
+.txt
+.htm
+
+# Ignore all subdirectories
+*/*
